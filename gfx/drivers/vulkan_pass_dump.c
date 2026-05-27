@@ -193,7 +193,7 @@ vulkan_pass_dump_t *vulkan_pass_dump_arm(
    vulkan_pass_dump_t *d;
    char timestamp[32];
    char subdir[256];
-   char base[1024];
+   char base[2048];
 
    if (!ctx || !chain || !screenshot_dir)
    {
@@ -207,9 +207,8 @@ vulkan_pass_dump_t *vulkan_pass_dump_arm(
       RARCH_WARN("[Pass Dump] No active slang preset.\n");
       return NULL;
    }
-   /* Last pass is the "final" pass; count it separately. */
-   if (offscreen >= 1)
-      offscreen -= 1;
+   /* Last pass is the "final" pass; count it separately via record_final. */
+   offscreen -= 1;
 
    if (vulkan_filter_chain_get_original_image(chain) == VK_NULL_HANDLE)
    {
@@ -280,6 +279,8 @@ vulkan_pass_dump_t *vulkan_pass_dump_arm(
       }
 
       p->out_filename = (char*)malloc(32);
+      if (!p->out_filename)
+         goto fail;
       snprintf(p->out_filename, 32, "00_original.ktx2");
       strlcpy(p->display_name, "original", sizeof p->display_name);
    }
@@ -309,6 +310,8 @@ vulkan_pass_dump_t *vulkan_pass_dump_arm(
       raw = vulkan_filter_chain_get_pass_name(chain, i);
       sanitize_pass_name(raw, p->display_name, sizeof p->display_name);
       p->out_filename = (char*)malloc(96);
+      if (!p->out_filename)
+         goto fail;
       snprintf(p->out_filename, 96, "%02u_pass%02u_%s.ktx2", 1u + i, i, p->display_name);
    }
 
