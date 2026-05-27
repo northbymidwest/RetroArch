@@ -322,6 +322,45 @@ static uint64_t ktx2_align_up(uint64_t v, uint64_t a)
    return (v + a - 1) & ~(a - 1);
 }
 
+/* Total bytes for KVD section: each entry is 4-byte length + key+\0 + value,
+ * padded to 4-byte alignment between entries (and after the last). */
+static size_t ktx2_kvd_total_size(const ktx2_kv_pair_t *pairs, size_t n)
+{
+   size_t i, total = 0;
+   for (i = 0; i < n; i++)
+   {
+      size_t key_len = strlen(pairs[i].key) + 1;
+      size_t kv_len  = key_len + pairs[i].value_len;
+      total += 4 + kv_len;
+      total = (total + 3u) & ~3u;
+   }
+   return total;
+}
+
+static bool ktx2_write_kvd(FILE *f, const ktx2_kv_pair_t *pairs, size_t n)
+{
+   size_t i;
+   for (i = 0; i < n; i++)
+   {
+      size_t   key_len = strlen(pairs[i].key) + 1;
+      uint32_t kv_len  = (uint32_t)(key_len + pairs[i].value_len);
+      if (fwrite(&kv_len, 4, 1, f) != 1) return false;
+      if (fwrite(pairs[i].key, 1, key_len, f) != key_len) return false;
+      if (pairs[i].value_len > 0)
+         if (fwrite(pairs[i].value, 1, pairs[i].value_len, f) != pairs[i].value_len)
+            return false;
+      /* Pad to 4-byte alignment. */
+      uint32_t pos = 4u + (uint32_t)kv_len;
+      while (pos & 3u)
+      {
+         uint8_t z = 0;
+         if (fwrite(&z, 1, 1, f) != 1) return false;
+         pos++;
+      }
+   }
+   return true;
+}
+
 static uint32_t ktx2_type_size_for(VkFormat fmt)
 {
    /* typeSize is the size of one "type" used to pack one channel for
@@ -455,7 +494,7 @@ bool ktx2_write_file(const char *out_path, const ktx2_write_params_t *p)
    }
 
    kvd_offset    = dfd_offset + dfd_len;
-   kvd_len       = 0;                           /* T5 fills this */
+   kvd_len       = ktx2_kvd_total_size(p->kv_pairs, p->kv_pair_count);
    image_offset  = ktx2_align_up(kvd_offset + kvd_len, KTX2_IMAGE_ALIGNMENT);
 
    memset(&hdr, 0, sizeof hdr);
@@ -502,7 +541,9 @@ bool ktx2_write_file(const char *out_path, const ktx2_write_params_t *p)
    /* DFD. */
    if (fwrite(dfd_buf, 1, dfd_len, f) != dfd_len) goto io_fail;
 
-   /* (KVD section: T5.) */
+   /* KVD section. */
+   if (kvd_len > 0)
+      if (!ktx2_write_kvd(f, p->kv_pairs, p->kv_pair_count)) goto io_fail;
 
    /* Pad to image alignment. */
    while ((uint64_t)ftell(f) < image_offset)

@@ -346,6 +346,66 @@ static void test_dfd_byte_content(void)
    }
 }
 
+static void test_kvd_section(void)
+{
+   const char *path = "/tmp/ktx2_test_kvd.ktx2";
+   uint8_t pixels[4 * 4 * 4];
+   memset(pixels, 0x11, sizeof pixels);
+
+   const char *orient = "rd";  /* + implicit \0 */
+   const char *meta   = "{\"pass\":3}";
+   ktx2_kv_pair_t kvs[2] = {
+      { "KTXorientation", orient, 3 },   /* include trailing \0 */
+      { "RAretroarch",    meta,   strlen(meta) + 1 }
+   };
+
+   ktx2_write_params_t p = {
+      .vk_format     = VK_FORMAT_R8G8B8A8_UNORM,
+      .width         = 4,
+      .height        = 4,
+      .pixels        = pixels,
+      .pixels_size   = sizeof pixels,
+      .kv_pairs      = kvs,
+      .kv_pair_count = 2,
+   };
+   CHECK(ktx2_write_file(path, &p));
+
+   FILE *f = fopen(path, "rb");
+   CHECK(f != NULL); if (!f) return;
+
+   /* Skip identifier (12) + first 11 uint32 fields of header to reach kvd_byte_offset. */
+   fseek(f, 12 + 11 * 4, SEEK_SET);
+   uint32_t kvd_off, kvd_len;
+   CHECK(fread(&kvd_off, 4, 1, f) == 1);
+   CHECK(fread(&kvd_len, 4, 1, f) == 1);
+   CHECK(kvd_off > 0);
+   CHECK(kvd_len > 0);
+
+   fseek(f, (long)kvd_off, SEEK_SET);
+   /* First entry: KTXorientation = "rd\0". */
+   uint32_t e1_len;
+   CHECK(fread(&e1_len, 4, 1, f) == 1);
+   /* key "KTXorientation" (14) + \0 (1) + value "rd\0" (3) = 18 */
+   CHECK(e1_len == 18);
+   char buf1[18];
+   CHECK(fread(buf1, 1, 18, f) == 18);
+   CHECK(memcmp(buf1, "KTXorientation\0rd\0", 18) == 0);
+
+   /* Padding to 4 bytes. e1_len=18 → pad 2 bytes. */
+   uint8_t pad[2];
+   CHECK(fread(pad, 1, 2, f) == 2);
+   CHECK(pad[0] == 0 && pad[1] == 0);
+
+   /* Second entry: RAretroarch. */
+   uint32_t e2_len;
+   CHECK(fread(&e2_len, 4, 1, f) == 1);
+   /* key "RAretroarch" (11) + \0 (1) + value "{\"pass\":3}\0" (11) = 23 */
+   CHECK(e2_len == 23);
+
+   fclose(f);
+   remove(path);
+}
+
 int main(void)
 {
    test_level_index_and_dfd();
@@ -354,6 +414,7 @@ int main(void)
    test_header_layout();
    test_bytes_per_texel();
    test_identifier_bytes();
+   test_kvd_section();
    if (failures)
    {
       fprintf(stderr, "%d test(s) failed\n", failures);
