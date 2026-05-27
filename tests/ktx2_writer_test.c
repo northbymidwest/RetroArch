@@ -59,8 +59,50 @@ static void test_identifier_bytes(void)
    CHECK(memcmp(ktx2_identifier, expected, 12) == 0);
 }
 
+static void test_header_layout(void)
+{
+   const char *path = "/tmp/ktx2_test_header.ktx2";
+   uint8_t pixels[4 * 4 * 4];
+   memset(pixels, 0x55, sizeof pixels);
+
+   ktx2_write_params_t p = {
+      .vk_format     = VK_FORMAT_R8G8B8A8_UNORM,
+      .width         = 4,
+      .height        = 4,
+      .pixels        = pixels,
+      .pixels_size   = sizeof pixels,
+      .kv_pairs      = NULL,
+      .kv_pair_count = 0,
+   };
+   CHECK(ktx2_write_file(path, &p));
+
+   FILE *f = fopen(path, "rb");
+   CHECK(f != NULL);
+   if (!f) return;
+
+   uint8_t id[12];
+   CHECK(fread(id, 1, 12, f) == 12);
+   CHECK(memcmp(id, ktx2_identifier, 12) == 0);
+
+   uint32_t hdr[17];
+   CHECK(fread(hdr, sizeof(uint32_t), 17, f) == 17);
+   CHECK(hdr[0]  == VK_FORMAT_R8G8B8A8_UNORM);   /* vkFormat */
+   CHECK(hdr[1]  == 1);                          /* typeSize */
+   CHECK(hdr[2]  == 4);                          /* pixelWidth */
+   CHECK(hdr[3]  == 4);                          /* pixelHeight */
+   CHECK(hdr[4]  == 0);                          /* pixelDepth */
+   CHECK(hdr[5]  == 0);                          /* layerCount */
+   CHECK(hdr[6]  == 1);                          /* faceCount */
+   CHECK(hdr[7]  == 1);                          /* levelCount */
+   CHECK(hdr[8]  == 0);                          /* supercompressionScheme */
+
+   fclose(f);
+   remove(path);
+}
+
 int main(void)
 {
+   test_header_layout();
    test_bytes_per_texel();
    test_identifier_bytes();
    if (failures)
