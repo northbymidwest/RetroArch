@@ -338,11 +338,111 @@ void vulkan_pass_dump_free(vulkan_pass_dump_t *d)
    free(d);
 }
 
-/* Stubs filled in subsequent tasks. */
-void vulkan_pass_dump_record_offscreen(
-      vulkan_pass_dump_t *dump, VkCommandBuffer cmd, vulkan_filter_chain_t *chain)
+static void record_one_image_to_staging(
+      VkCommandBuffer cmd,
+      const pass_image_t *p,
+      VkImageLayout src_layout_in,
+      VkImageLayout dst_layout_out,
+      VkImageAspectFlags aspect)
 {
-   (void)dump; (void)cmd; (void)chain;
+   VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+   VkBufferImageCopy r = {0};
+
+   /* Transition: src_layout_in -> TRANSFER_SRC_OPTIMAL */
+   b.srcAccessMask                   = VK_ACCESS_SHADER_READ_BIT
+                                       | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+   b.dstAccessMask                   = VK_ACCESS_TRANSFER_READ_BIT;
+   b.oldLayout                       = src_layout_in;
+   b.newLayout                       = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+   b.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+   b.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+   b.image                           = p->src_image;
+   b.subresourceRange.aspectMask     = aspect;
+   b.subresourceRange.baseMipLevel   = 0;
+   b.subresourceRange.levelCount     = 1;
+   b.subresourceRange.baseArrayLayer = 0;
+   b.subresourceRange.layerCount     = 1;
+   vkCmdPipelineBarrier(cmd,
+         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+         VK_PIPELINE_STAGE_TRANSFER_BIT,
+         0, 0, NULL, 0, NULL, 1, &b);
+
+   /* Copy. */
+   r.bufferOffset                    = 0;
+   r.bufferRowLength                 = 0;  /* tight rows */
+   r.bufferImageHeight               = 0;
+   r.imageSubresource.aspectMask     = aspect;
+   r.imageSubresource.mipLevel       = 0;
+   r.imageSubresource.baseArrayLayer = 0;
+   r.imageSubresource.layerCount     = 1;
+   r.imageOffset.x                   = 0;
+   r.imageOffset.y                   = 0;
+   r.imageOffset.z                   = 0;
+   r.imageExtent.width               = p->extent.width;
+   r.imageExtent.height              = p->extent.height;
+   r.imageExtent.depth               = 1;
+   vkCmdCopyImageToBuffer(cmd,
+         p->src_image,
+         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+         p->staging,
+         1, &r);
+
+   /* Restore: TRANSFER_SRC_OPTIMAL -> dst_layout_out */
+   b.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+   b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT
+                     | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+   b.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+   b.newLayout     = dst_layout_out;
+   vkCmdPipelineBarrier(cmd,
+         VK_PIPELINE_STAGE_TRANSFER_BIT,
+         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+         0, 0, NULL, 0, NULL, 1, &b);
+}
+
+void vulkan_pass_dump_record_offscreen(
+      vulkan_pass_dump_t *dump,
+      VkCommandBuffer cmd,
+      vulkan_filter_chain_t *chain)
+{
+   unsigned i;
+   unsigned now_offscreen;
+
+   if (!dump || dump->aborted || dump->offscreen_recorded || !chain)
+      return;
+
+   /* Sanity: pass count must match what we armed with. */
+   now_offscreen = vulkan_filter_chain_get_pass_count(chain);
+   if (now_offscreen >= 1) now_offscreen -= 1;
+   if (now_offscreen != dump->offscreen_count)
+   {
+      RARCH_WARN("[Pass Dump] Pass count changed (%u -> %u) since arm; aborting.\n",
+            dump->offscreen_count, now_offscreen);
+      dump->aborted = true;
+      return;
+   }
+
+   /* Original (slot 0). */
+   {
+      pass_image_t *p = &dump->images[0];
+      record_one_image_to_staging(cmd, p,
+            p->prev_layout,
+            p->prev_layout,
+            VK_IMAGE_ASPECT_COLOR_BIT);
+      p->recorded = true;
+   }
+
+   /* Offscreen passes (slots 1..offscreen_count). */
+   for (i = 0; i < dump->offscreen_count; i++)
+   {
+      pass_image_t *p = &dump->images[1 + i];
+      record_one_image_to_staging(cmd, p,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_IMAGE_ASPECT_COLOR_BIT);
+      p->recorded = true;
+   }
+
+   dump->offscreen_recorded = true;
 }
 
 void vulkan_pass_dump_record_final(
