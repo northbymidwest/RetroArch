@@ -181,6 +181,56 @@ static void free_staging(VkDevice device, pass_image_t *p)
    p->out_filename = NULL;
 }
 
+static const char *vk_format_name(VkFormat f)
+{
+   switch (f)
+   {
+      /* 1-channel */
+      case VK_FORMAT_R8_UNORM:                 return "VK_FORMAT_R8_UNORM";
+      case VK_FORMAT_R8_UINT:                  return "VK_FORMAT_R8_UINT";
+      case VK_FORMAT_R8_SINT:                  return "VK_FORMAT_R8_SINT";
+      case VK_FORMAT_R16_UINT:                 return "VK_FORMAT_R16_UINT";
+      case VK_FORMAT_R16_SINT:                 return "VK_FORMAT_R16_SINT";
+      case VK_FORMAT_R16_SFLOAT:               return "VK_FORMAT_R16_SFLOAT";
+      case VK_FORMAT_R32_UINT:                 return "VK_FORMAT_R32_UINT";
+      case VK_FORMAT_R32_SINT:                 return "VK_FORMAT_R32_SINT";
+      case VK_FORMAT_R32_SFLOAT:               return "VK_FORMAT_R32_SFLOAT";
+
+      /* 2-channel */
+      case VK_FORMAT_R8G8_UNORM:               return "VK_FORMAT_R8G8_UNORM";
+      case VK_FORMAT_R8G8_UINT:                return "VK_FORMAT_R8G8_UINT";
+      case VK_FORMAT_R8G8_SINT:                return "VK_FORMAT_R8G8_SINT";
+      case VK_FORMAT_R16G16_UINT:              return "VK_FORMAT_R16G16_UINT";
+      case VK_FORMAT_R16G16_SINT:              return "VK_FORMAT_R16G16_SINT";
+      case VK_FORMAT_R16G16_SFLOAT:            return "VK_FORMAT_R16G16_SFLOAT";
+      case VK_FORMAT_R32G32_UINT:              return "VK_FORMAT_R32G32_UINT";
+      case VK_FORMAT_R32G32_SINT:              return "VK_FORMAT_R32G32_SINT";
+      case VK_FORMAT_R32G32_SFLOAT:            return "VK_FORMAT_R32G32_SFLOAT";
+
+      /* 4-channel */
+      case VK_FORMAT_R8G8B8A8_UNORM:           return "VK_FORMAT_R8G8B8A8_UNORM";
+      case VK_FORMAT_R8G8B8A8_UINT:            return "VK_FORMAT_R8G8B8A8_UINT";
+      case VK_FORMAT_R8G8B8A8_SINT:            return "VK_FORMAT_R8G8B8A8_SINT";
+      case VK_FORMAT_R8G8B8A8_SRGB:            return "VK_FORMAT_R8G8B8A8_SRGB";
+      case VK_FORMAT_B8G8R8A8_UNORM:           return "VK_FORMAT_B8G8R8A8_UNORM";
+      case VK_FORMAT_B8G8R8A8_SRGB:            return "VK_FORMAT_B8G8R8A8_SRGB";
+      case VK_FORMAT_R16G16B16A16_UINT:        return "VK_FORMAT_R16G16B16A16_UINT";
+      case VK_FORMAT_R16G16B16A16_SINT:        return "VK_FORMAT_R16G16B16A16_SINT";
+      case VK_FORMAT_R16G16B16A16_UNORM:       return "VK_FORMAT_R16G16B16A16_UNORM";
+      case VK_FORMAT_R16G16B16A16_SFLOAT:      return "VK_FORMAT_R16G16B16A16_SFLOAT";
+      case VK_FORMAT_R32G32B32A32_UINT:        return "VK_FORMAT_R32G32B32A32_UINT";
+      case VK_FORMAT_R32G32B32A32_SINT:        return "VK_FORMAT_R32G32B32A32_SINT";
+      case VK_FORMAT_R32G32B32A32_SFLOAT:      return "VK_FORMAT_R32G32B32A32_SFLOAT";
+
+      /* Packed */
+      case VK_FORMAT_A2B10G10R10_UNORM_PACK32: return "VK_FORMAT_A2B10G10R10_UNORM_PACK32";
+      case VK_FORMAT_A2B10G10R10_UINT_PACK32:  return "VK_FORMAT_A2B10G10R10_UINT_PACK32";
+      case VK_FORMAT_B10G11R11_UFLOAT_PACK32:  return "VK_FORMAT_B10G11R11_UFLOAT_PACK32";
+
+      default:                                  return "VkFormat(unknown)";
+   }
+}
+
 vulkan_pass_dump_t *vulkan_pass_dump_arm(
       const vulkan_pass_dump_ctx_t *ctx,
       vulkan_filter_chain_t *chain,
@@ -502,16 +552,144 @@ void vulkan_pass_dump_record_final(
          VK_IMAGE_ASPECT_COLOR_BIT);
    p->recorded = true;
 
-   /* Note format for manifest. T12 has the canonical name table; for now,
-    * a placeholder so the field isn't empty if T12 doesn't overwrite. */
-   snprintf(dump->swapchain_format_name, sizeof dump->swapchain_format_name,
-         "VkFormat(%d)", (int)swapchain_format);
+   /* Store canonical format name for manifest. */
+   strlcpy(dump->swapchain_format_name, vk_format_name(swapchain_format),
+         sizeof dump->swapchain_format_name);
 
    dump->final_recorded = true;
 }
 
-void vulkan_pass_dump_flush(vulkan_pass_dump_t *dump)
+static void compose_kvd_for(const vulkan_pass_dump_t *d, const pass_image_t *p,
+      char *json_out, size_t json_size)
 {
-   /* T9: just free; real flush lands in T12. */
-   vulkan_pass_dump_free(dump);
+   snprintf(json_out, json_size,
+         "{\"pass\":%d,\"name\":\"%s\","
+         "\"input_extent\":[%u,%u],\"output_extent\":[%u,%u],"
+         "\"frame_index\":%llu,\"capture_time\":\"%s\"}",
+         p->pass_index,
+         p->display_name[0] ? p->display_name : "unnamed",
+         d->images[0].extent.width, d->images[0].extent.height,
+         p->extent.width, p->extent.height,
+         (unsigned long long)d->frame_count,
+         d->capture_time_iso);
+}
+
+static bool write_one_ktx2(const vulkan_pass_dump_t *d, const pass_image_t *p)
+{
+   char  path[2048];
+   char  kvd_json[512];
+   ktx2_kv_pair_t kvs[2];
+   ktx2_write_params_t wp;
+
+   fill_pathname_join_special(path, d->out_dir, p->out_filename, sizeof path);
+
+   compose_kvd_for(d, p, kvd_json, sizeof kvd_json);
+
+   kvs[0].key       = "KTXorientation";
+   kvs[0].value     = "rd";
+   kvs[0].value_len = 3;   /* "rd" + trailing \0 */
+   kvs[1].key       = "RAretroarch";
+   kvs[1].value     = kvd_json;
+   kvs[1].value_len = strlen(kvd_json) + 1;
+
+   memset(&wp, 0, sizeof wp);
+   wp.vk_format     = p->format;
+   wp.width         = p->extent.width;
+   wp.height        = p->extent.height;
+   wp.pixels        = p->mapped;
+   wp.pixels_size   = (size_t)p->staging_size;
+   wp.kv_pairs      = kvs;
+   wp.kv_pair_count = 2;
+   return ktx2_write_file(path, &wp);
+}
+
+static void write_manifest(const vulkan_pass_dump_t *d)
+{
+   char path[2048];
+   FILE *f;
+   unsigned i;
+
+   fill_pathname_join_special(path, d->out_dir, "manifest.json", sizeof path);
+   f = fopen(path, "wb");
+   if (!f)
+   {
+      RARCH_WARN("[Pass Dump] Could not write %s\n", path);
+      return;
+   }
+
+   fprintf(f,
+         "{\n"
+         "  \"schema\": 1,\n"
+         "  \"video_driver\": \"vulkan\",\n"
+         "  \"preset_path\": \"%s\",\n"
+         "  \"num_passes\": %u,\n"
+         "  \"swapchain_format\": \"%s\",\n"
+         "  \"frame_index\": %llu,\n"
+         "  \"capture_time\": \"%s\",\n"
+         "  \"files\": [\n",
+         d->preset_path[0] ? d->preset_path : "",
+         d->offscreen_count + 1u,
+         d->swapchain_format_name[0] ? d->swapchain_format_name : "VkFormat(unknown)",
+         (unsigned long long)d->frame_count,
+         d->capture_time_iso);
+
+   for (i = 0; i < d->num_images; i++)
+   {
+      const pass_image_t *p = &d->images[i];
+      fprintf(f,
+            "    {\"path\": \"%s\", \"pass\": %d, \"extent\": [%u, %u], \"vk_format\": \"%s\"}%s\n",
+            p->out_filename ? p->out_filename : "(unknown)",
+            p->pass_index,
+            p->extent.width, p->extent.height,
+            vk_format_name(p->format),
+            (i + 1 == d->num_images) ? "" : ",");
+   }
+
+   fprintf(f, "  ]\n}\n");
+   fclose(f);
+}
+
+void vulkan_pass_dump_flush(vulkan_pass_dump_t *d)
+{
+   unsigned i;
+   unsigned n_ranges = 0;
+   VkMappedMemoryRange ranges[64];
+
+   if (!d) return;
+
+   if (d->aborted || !d->offscreen_recorded)
+   {
+      RARCH_WARN("[Pass Dump] Discarding aborted or never-recorded dump.\n");
+      vulkan_pass_dump_free(d);
+      return;
+   }
+
+   /* HOST_COHERENT memory, but call invalidate for portability. */
+   for (i = 0; i < d->num_images && n_ranges < 64; i++)
+   {
+      VkMappedMemoryRange r = { VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
+      if (!d->images[i].memory) continue;
+      r.memory = d->images[i].memory;
+      r.offset = 0;
+      r.size   = VK_WHOLE_SIZE;
+      ranges[n_ranges++] = r;
+   }
+   if (n_ranges > 0)
+      vkInvalidateMappedMemoryRanges(d->ctx.device, n_ranges, ranges);
+
+   /* Write KTX2 files in slot order: Original, then offscreen 0..N-2, then final. */
+   for (i = 0; i < d->num_images; i++)
+   {
+      const pass_image_t *p = &d->images[i];
+      if (!p->recorded || !p->mapped) continue;
+      if (!write_one_ktx2(d, p))
+         RARCH_WARN("[Pass Dump] Failed to write %s\n",
+               p->out_filename ? p->out_filename : "(unknown)");
+   }
+
+   write_manifest(d);
+
+   RARCH_LOG("[Pass Dump] Wrote %u files to %s\n", d->num_images, d->out_dir);
+
+   vulkan_pass_dump_free(d);
 }
