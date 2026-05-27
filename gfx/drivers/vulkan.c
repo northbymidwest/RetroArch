@@ -49,6 +49,8 @@
 
 #include "../common/vulkan_common.h"
 
+#include "vulkan_pass_dump.h"
+
 #include "../../configuration.h"
 #ifdef HAVE_REWIND
 #include "../../state_manager.h"
@@ -56,6 +58,7 @@
 
 #include "../../record/record_driver.h"
 #include "../../retroarch.h"
+#include "../../runloop.h"
 #include "../../verbosity.h"
 
 /* Write 4 unique vertices per quad for use with indexed drawing.
@@ -385,6 +388,13 @@ typedef struct vk
       VkRect2D scissor;    /* int32_t alignment */
    } tracker;
    uint32_t flags;
+
+   /* Slang shader pass dump (debug feature, Vulkan-only). NULL when not
+    * armed/in-flight; allocated by vulkan_dump_slang_passes_request() and
+    * consumed at the next frame boundary. */
+   vulkan_pass_dump_t *pass_dump;
+   bool                pass_dump_arm_pending;
+   bool                pass_dump_unsupported_logged;
 } vk_t;
 
 typedef struct
@@ -4676,6 +4686,12 @@ static void vulkan_free(void *data)
    if (!vk)
       return;
 
+   if (vk->pass_dump)
+   {
+      vulkan_pass_dump_free(vk->pass_dump);
+      vk->pass_dump = NULL;
+   }
+
    if (vk->context && vk->context->device)
    {
 #ifdef HAVE_THREADS
@@ -6339,6 +6355,18 @@ static bool vulkan_frame(void *data, const void *frame,
    VkCommandBufferBeginInfo begin_info;
    VkSemaphore signal_semaphores[2];
    vk_t *vk                                      = (vk_t*)data;
+
+   /* Flush any completed pass-dump from the previous frame.
+    * We wait for idle here because the staging buffers are written by the
+    * GPU after the submit completes; this path only fires once after a dump
+    * was requested and is acceptable overhead for a debug feature. */
+   if (vk && vk->pass_dump)
+   {
+      vkQueueWaitIdle(vk->context->queue);
+      vulkan_pass_dump_flush(vk->pass_dump);
+      vk->pass_dump = NULL;
+   }
+
    vulkan_filter_chain_t *filter_chain           = NULL;
    bool waits_for_semaphores                     = false;
    unsigned width                                = video_info->width;
@@ -6383,6 +6411,33 @@ static bool vulkan_frame(void *data, const void *frame,
 
    if (!filter_chain && vk->filter_chain_default)
       filter_chain = vk->filter_chain_default;
+
+   /* Arm pass dump if requested. */
+   if (vk->pass_dump_arm_pending)
+   {
+      settings_t *_settings  = config_get_ptr();
+      runloop_state_t *_rls  = runloop_state_get_ptr();
+      vulkan_pass_dump_ctx_t _dump_ctx;
+      const char *_core_name;
+
+      vk->pass_dump_arm_pending = false;
+
+      _core_name = (_rls && _rls->system.info.library_name && _rls->system.info.library_name[0])
+         ? _rls->system.info.library_name
+         : "core";
+
+      _dump_ctx.device      = vk->context->device;
+      _dump_ctx.gpu         = vk->context->gpu;
+      _dump_ctx.mem_props   = &vk->context->memory_properties;
+      _dump_ctx.frame_count = (uint64_t)vk->context->current_frame_index;
+
+      vk->pass_dump = vulkan_pass_dump_arm(
+            &_dump_ctx,
+            filter_chain,
+            _settings ? _settings->paths.directory_screenshot : "",
+            _core_name,
+            _settings ? _settings->paths.path_shader : "");
+   }
 
 #ifdef VULKAN_HDR_SWAPCHAIN
    /* Use the offscreen buffer when the shader's output format doesn't match
@@ -6709,6 +6764,10 @@ static bool vulkan_frame(void *data, const void *frame,
          (vulkan_filter_chain_t*)filter_chain,
          vk->cmd, &vk->vk_vp);
 
+   if (vk->pass_dump)
+      vulkan_pass_dump_record_offscreen(vk->pass_dump, vk->cmd,
+            filter_chain);
+
 #if defined(HAVE_MENU)
    /* Upload menu texture. */
    if (vk->flags & VK_FLAG_MENU_ENABLE)
@@ -6780,6 +6839,18 @@ static bool vulkan_frame(void *data, const void *frame,
       vulkan_filter_chain_build_viewport_pass(
             (vulkan_filter_chain_t*)filter_chain, vk->cmd,
             &vk->vk_vp, vk->mvp.data);
+
+      if (vk->pass_dump)
+      {
+         VkExtent2D _swap_ext;
+         _swap_ext.width  = vk->context->swapchain_width;
+         _swap_ext.height = vk->context->swapchain_height;
+         vulkan_pass_dump_record_final(vk->pass_dump, vk->cmd,
+               filter_chain,
+               backbuffer->image,
+               vk->context->swapchain_format,
+               _swap_ext);
+      }
 
 #ifdef VULKAN_HDR_SWAPCHAIN
       bool end_pass = true;
@@ -8442,6 +8513,21 @@ static bool vulkan_focus(void *data)
    if (vk && vk->ctx_driver && vk->ctx_driver->has_focus)
       return vk->ctx_driver->has_focus(vk->ctx_data);
    return true;
+}
+
+/* Public entry called from video_driver_dump_slang_passes() in T15.
+ * Sets a one-shot flag consumed at the top of the next vulkan_frame. */
+void vulkan_dump_slang_passes_request(void *data)
+{
+   vk_t *vk = (vk_t*)data;
+   if (!vk)
+      return;
+   if (vk->pass_dump)
+   {
+      RARCH_WARN("[Pass Dump] A previous dump is still in flight; ignoring request.\n");
+      return;
+   }
+   vk->pass_dump_arm_pending = true;
 }
 
 video_driver_t video_vulkan = {
