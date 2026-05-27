@@ -446,10 +446,68 @@ void vulkan_pass_dump_record_offscreen(
 }
 
 void vulkan_pass_dump_record_final(
-      vulkan_pass_dump_t *dump, VkCommandBuffer cmd, vulkan_filter_chain_t *chain,
-      VkImage img, VkFormat fmt, VkExtent2D ext)
+      vulkan_pass_dump_t *dump,
+      VkCommandBuffer cmd,
+      vulkan_filter_chain_t *chain,
+      VkImage swapchain_image,
+      VkFormat swapchain_format,
+      VkExtent2D swapchain_extent)
 {
-   (void)dump; (void)cmd; (void)chain; (void)img; (void)fmt; (void)ext;
+   pass_image_t *p;
+   size_t bpt;
+   const char *raw;
+
+   if (!dump || dump->aborted || dump->final_recorded || !dump->offscreen_recorded)
+      return;
+
+   p = &dump->images[dump->num_images - 1];
+
+   bpt = ktx2_bytes_per_texel(swapchain_format);
+   if (bpt == 0) bpt = 8;   /* defensive overallocation */
+   p->src_image    = swapchain_image;
+   p->format       = swapchain_format;
+   p->extent       = swapchain_extent;
+   p->prev_layout  = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+   p->pass_index   = (int)dump->offscreen_count;
+   p->staging_size = (VkDeviceSize)swapchain_extent.width
+                     * swapchain_extent.height * bpt;
+
+   if (!alloc_staging(&dump->ctx, p->staging_size,
+            &p->staging, &p->memory, &p->mapped))
+   {
+      RARCH_WARN("[Pass Dump] Final-pass staging alloc failed; aborting.\n");
+      dump->aborted = true;
+      return;
+   }
+
+   /* Resolve final-pass name via the chain (T13). */
+   raw = chain
+      ? vulkan_filter_chain_get_pass_name(chain, dump->offscreen_count)
+      : "";
+   sanitize_pass_name(raw, p->display_name, sizeof p->display_name);
+
+   p->out_filename = (char*)malloc(96);
+   if (!p->out_filename)
+   {
+      RARCH_WARN("[Pass Dump] Final-pass filename alloc failed; aborting.\n");
+      dump->aborted = true;
+      return;
+   }
+   snprintf(p->out_filename, 96, "%02u_pass%02u_%s_final.ktx2",
+         dump->num_images - 1u, dump->offscreen_count, p->display_name);
+
+   record_one_image_to_staging(cmd, p,
+         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+         VK_IMAGE_ASPECT_COLOR_BIT);
+   p->recorded = true;
+
+   /* Note format for manifest. T12 has the canonical name table; for now,
+    * a placeholder so the field isn't empty if T12 doesn't overwrite. */
+   snprintf(dump->swapchain_format_name, sizeof dump->swapchain_format_name,
+         "VkFormat(%d)", (int)swapchain_format);
+
+   dump->final_recorded = true;
 }
 
 void vulkan_pass_dump_flush(vulkan_pass_dump_t *dump)
