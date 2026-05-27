@@ -3392,6 +3392,40 @@ void video_driver_cached_frame_invalidate(void)
    cached_frame_lock_release();
 }
 
+#if defined(HAVE_VULKAN)
+extern video_driver_t video_vulkan;
+extern void vulkan_dump_slang_passes_request(void *data);
+#endif
+
+void video_driver_dump_slang_passes(void)
+{
+   static bool already_warned         = false;
+   video_driver_state_t *video_st     = video_state_get_ptr();
+
+   if (!video_st || !video_st->current_video || !video_st->data)
+   {
+      RARCH_WARN("[Pass Dump] No active video driver.\n");
+      return;
+   }
+
+#if defined(HAVE_VULKAN)
+   if (video_st->current_video == &video_vulkan)
+   {
+      vulkan_dump_slang_passes_request(video_st->data);
+      return;
+   }
+#endif
+
+   if (!already_warned)
+   {
+      already_warned = true;
+      RARCH_WARN("[Pass Dump] Only supported on the Vulkan video driver (current: %s).\n",
+            video_st->current_video->ident
+               ? video_st->current_video->ident
+               : "(unknown)");
+   }
+}
+
 bool video_driver_has_focus(void)
 {
    video_driver_state_t *video_st = &video_driver_st;

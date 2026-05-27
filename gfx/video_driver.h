@@ -936,6 +936,10 @@ void video_driver_set_stub_frame(void);
 
 void video_driver_unset_stub_frame(void);
 
+/* Slang-shader pass dump (Vulkan only). Logs a notice once per session
+ * if the active driver is not Vulkan. */
+void video_driver_dump_slang_passes(void);
+
 float video_driver_get_core_aspect(void);
 
 retro_time_t video_driver_get_frame_time_delta_usec(void);
