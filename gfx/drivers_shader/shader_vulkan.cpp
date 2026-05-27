@@ -818,6 +818,48 @@ struct vulkan_filter_chain
 
       VkFormat get_pass_rt_format(unsigned pass);
 
+      /* Read-only accessors for pass-dump tooling. */
+      unsigned get_pass_count() const { return (unsigned)passes.size(); }
+      VkImage get_pass_image(unsigned i) const
+      {
+         if (i >= passes.size())
+            return VK_NULL_HANDLE;
+         return passes[i]->get_framebuffer().get_image();
+      }
+      VkFormat get_pass_format(unsigned i) const
+      {
+         if (i >= passes.size())
+            return VK_FORMAT_UNDEFINED;
+         return passes[i]->get_framebuffer().get_format();
+      }
+      VkExtent2D get_pass_extent(unsigned i) const
+      {
+         VkExtent2D e = { 0, 0 };
+         if (i >= passes.size())
+            return e;
+         const Size2D &sz = passes[i]->get_framebuffer().get_size();
+         e.width  = sz.width;
+         e.height = sz.height;
+         return e;
+      }
+      const char *get_pass_name_for_dump(unsigned i) const
+      {
+         video_shader *vs = common.shader_preset.get();
+         if (!vs || i >= (unsigned)vs->passes)
+            return "";
+         if (vs->pass[i].alias[0])
+            return vs->pass[i].alias;
+         return vs->pass[i].source.path;
+      }
+      VkImage get_original_image() const { return input_texture.image; }
+      VkFormat get_original_format() const { return input_texture.format; }
+      VkExtent2D get_original_extent() const
+      {
+         VkExtent2D e = { input_texture.width, input_texture.height };
+         return e;
+      }
+      VkImageLayout get_original_layout() const { return input_texture.layout; }
+
       bool emits_hdr10() const;
       void set_hdr10();
 
@@ -4399,4 +4441,69 @@ bool vulkan_filter_chain_emits_hdr10(vulkan_filter_chain_t *chain)
 bool vulkan_filter_chain_emits_hdr16(vulkan_filter_chain_t *chain)
 {
    return chain->emits_hdr16();
+}
+
+unsigned vulkan_filter_chain_get_pass_count(vulkan_filter_chain_t *chain)
+{
+   if (!chain)
+      return 0;
+   return chain->get_pass_count();
+}
+
+VkImage vulkan_filter_chain_get_pass_image(vulkan_filter_chain_t *chain, unsigned i)
+{
+   if (!chain)
+      return VK_NULL_HANDLE;
+   return chain->get_pass_image(i);
+}
+
+VkFormat vulkan_filter_chain_get_pass_format(vulkan_filter_chain_t *chain, unsigned i)
+{
+   if (!chain)
+      return VK_FORMAT_UNDEFINED;
+   return chain->get_pass_format(i);
+}
+
+VkExtent2D vulkan_filter_chain_get_pass_extent(vulkan_filter_chain_t *chain, unsigned i)
+{
+   VkExtent2D e = { 0, 0 };
+   if (!chain)
+      return e;
+   return chain->get_pass_extent(i);
+}
+
+const char *vulkan_filter_chain_get_pass_name(vulkan_filter_chain_t *chain, unsigned i)
+{
+   if (!chain)
+      return "";
+   return chain->get_pass_name_for_dump(i);
+}
+
+VkImage vulkan_filter_chain_get_original_image(vulkan_filter_chain_t *chain)
+{
+   if (!chain)
+      return VK_NULL_HANDLE;
+   return chain->get_original_image();
+}
+
+VkFormat vulkan_filter_chain_get_original_format(vulkan_filter_chain_t *chain)
+{
+   if (!chain)
+      return VK_FORMAT_UNDEFINED;
+   return chain->get_original_format();
+}
+
+VkExtent2D vulkan_filter_chain_get_original_extent(vulkan_filter_chain_t *chain)
+{
+   VkExtent2D e = { 0, 0 };
+   if (!chain)
+      return e;
+   return chain->get_original_extent();
+}
+
+VkImageLayout vulkan_filter_chain_get_original_layout(vulkan_filter_chain_t *chain)
+{
+   if (!chain)
+      return VK_IMAGE_LAYOUT_UNDEFINED;
+   return chain->get_original_layout();
 }

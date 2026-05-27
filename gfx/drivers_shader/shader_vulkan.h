@@ -215,6 +215,18 @@ bool vulkan_filter_chain_compile_pass(
 
 bool vulkan_filter_chain_finalize(vulkan_filter_chain_t *chain);
 
+/* Read-only accessors for offline tooling (e.g. pass-dump debug feature).
+ * All return safe defaults when chain is NULL or i is out of range. */
+unsigned       vulkan_filter_chain_get_pass_count(vulkan_filter_chain_t *chain);
+VkImage        vulkan_filter_chain_get_pass_image(vulkan_filter_chain_t *chain, unsigned i);
+VkFormat       vulkan_filter_chain_get_pass_format(vulkan_filter_chain_t *chain, unsigned i);
+VkExtent2D     vulkan_filter_chain_get_pass_extent(vulkan_filter_chain_t *chain, unsigned i);
+const char    *vulkan_filter_chain_get_pass_name(vulkan_filter_chain_t *chain, unsigned i);
+VkImage        vulkan_filter_chain_get_original_image(vulkan_filter_chain_t *chain);
+VkFormat       vulkan_filter_chain_get_original_format(vulkan_filter_chain_t *chain);
+VkExtent2D     vulkan_filter_chain_get_original_extent(vulkan_filter_chain_t *chain);
+VkImageLayout  vulkan_filter_chain_get_original_layout(vulkan_filter_chain_t *chain);
+
 RETRO_END_DECLS
 
 #endif
