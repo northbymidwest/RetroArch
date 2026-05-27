@@ -24,6 +24,7 @@
 #include "cocoa_common.h"
 #include "apple_platform.h"
 #include "../ui_cocoa.h"
+#include "../../ui_companion_driver.h"
 #ifdef HAVE_RETROARCH_PLAYLIST_MANAGER
 #include "RetroArchPlaylistManager.h"
 #endif
@@ -133,7 +134,9 @@ static void rarch_draw_observer(CFRunLoopObserverRef observer,
    if (ret == -1)
    {
 #ifdef HAVE_QT
-      application->quit();
+      const ui_application_t *application = uico_state_get_ptr()->drv->application;
+      if (application)
+         application->quit();
 #endif
       main_exit(NULL);
       exit(0);

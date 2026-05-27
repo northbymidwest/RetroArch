@@ -163,6 +163,9 @@ wiiu/wut/elf2rpl/elf2rpl
 compile_commands.json
 pkg/apple/iOS/build/
 pkg/apple/build/
+build-macos/
+default.metallib
+*.air
 ui/drivers/qt/moc_*
 ui/drivers/moc_*
 
