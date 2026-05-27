@@ -406,6 +406,44 @@ static void test_kvd_section(void)
    remove(path);
 }
 
+static void test_image_data_roundtrip(void)
+{
+   const char *path = "/tmp/ktx2_test_image.ktx2";
+   uint8_t pixels[8 * 8 * 8];           /* 8x8 R16G16B16A16_SFLOAT */
+   size_t i;
+   for (i = 0; i < sizeof pixels; i++)
+      pixels[i] = (uint8_t)(i * 31u);
+
+   ktx2_write_params_t p = {
+      .vk_format     = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .width         = 8,
+      .height        = 8,
+      .pixels        = pixels,
+      .pixels_size   = sizeof pixels,
+   };
+   CHECK(ktx2_write_file(path, &p));
+
+   FILE *f = fopen(path, "rb");
+   CHECK(f != NULL); if (!f) return;
+
+   /* Read level index entry: located at offset 12 (identifier) + 68 (header) = 80. */
+   fseek(f, 12 + 68, SEEK_SET);
+   uint64_t lvl_off, lvl_len, lvl_unc;
+   CHECK(fread(&lvl_off, 8, 1, f) == 1);
+   CHECK(fread(&lvl_len, 8, 1, f) == 1);
+   CHECK(fread(&lvl_unc, 8, 1, f) == 1);
+   CHECK(lvl_off % 16 == 0);
+   CHECK(lvl_len == sizeof pixels);
+
+   uint8_t round[sizeof pixels];
+   fseek(f, (long)lvl_off, SEEK_SET);
+   CHECK(fread(round, 1, sizeof pixels, f) == sizeof pixels);
+   CHECK(memcmp(round, pixels, sizeof pixels) == 0);
+
+   fclose(f);
+   remove(path);
+}
+
 int main(void)
 {
    test_level_index_and_dfd();
@@ -415,6 +453,7 @@ int main(void)
    test_bytes_per_texel();
    test_identifier_bytes();
    test_kvd_section();
+   test_image_data_roundtrip();
    if (failures)
    {
       fprintf(stderr, "%d test(s) failed\n", failures);
