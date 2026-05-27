@@ -106,6 +106,12 @@ static size_t ktx2_emit_basic_header(uint8_t *out,
    return 24;
 }
 
+/* NOTE: this emitter does not correctly handle SNORM formats (which would
+ * need sample.lower = -max, sample.upper = +max instead of UNORM's
+ * 0..max).  No SNORM formats appear in the slang shader format set
+ * (gfx/drivers_shader/glslang_util.h), so this is fine in practice — but
+ * any future SNORM addition must extend the lower/upper logic below. */
+
 /* Parametric emitter for non-packed RGBA-family formats.
  *   - num_channels: 1, 2, or 4
  *   - bits_per_channel: 8, 16, or 32
@@ -213,8 +219,10 @@ static size_t ktx2_emit_dfd_basic(uint8_t *out,
    return n;
 }
 
-/* Packed format: A:2, B:10, G:10, R:10 stored as little-endian uint32. */
-static size_t ktx2_emit_dfd_a2b10g10r10(uint8_t *out, bool is_int)
+/* Packed format: A:2, B:10, G:10, R:10 stored as little-endian uint32.
+ * UNORM and UINT use identical lower/upper (0..1023 for color, 0..3 for alpha);
+ * the vkFormat field in the KTX2 main header is authoritative for distinguishing them. */
+static size_t ktx2_emit_dfd_a2b10g10r10(uint8_t *out)
 {
    size_t n = 0;
    uint16_t block_size = (uint16_t)(24 + 4 * 16);
@@ -222,14 +230,10 @@ static size_t ktx2_emit_dfd_a2b10g10r10(uint8_t *out, bool is_int)
    memcpy(out + n, &total, 4); n += 4;
    n += ktx2_emit_basic_header(out + n, block_size,
          KDF_MODEL_RGBSDA, KDF_PRIMARIES_BT709, KDF_TRANSFER_LINEAR, 4);
-   /* Spec packing order: A2 occupies the high bits.  Sample order R, G, B, A
-    * with ascending bit offsets. */
-   uint32_t color_upper = is_int ? 1023u : 1023u;   /* same for UNORM and UINT */
-   uint32_t alpha_upper = is_int ? 3u    : 3u;
-   n += ktx2_emit_sample(out + n,  0,  9, KDF_CHANNEL_RGBSDA_RED,   0, 0, color_upper);
-   n += ktx2_emit_sample(out + n, 10,  9, KDF_CHANNEL_RGBSDA_GREEN, 0, 0, color_upper);
-   n += ktx2_emit_sample(out + n, 20,  9, KDF_CHANNEL_RGBSDA_BLUE,  0, 0, color_upper);
-   n += ktx2_emit_sample(out + n, 30,  1, KDF_CHANNEL_RGBSDA_ALPHA, 0, 0, alpha_upper);
+   n += ktx2_emit_sample(out + n,  0,  9, KDF_CHANNEL_RGBSDA_RED,   0, 0, 1023u);
+   n += ktx2_emit_sample(out + n, 10,  9, KDF_CHANNEL_RGBSDA_GREEN, 0, 0, 1023u);
+   n += ktx2_emit_sample(out + n, 20,  9, KDF_CHANNEL_RGBSDA_BLUE,  0, 0, 1023u);
+   n += ktx2_emit_sample(out + n, 30,  1, KDF_CHANNEL_RGBSDA_ALPHA, 0, 0, 3u);
    return n;
 }
 
@@ -263,9 +267,8 @@ static size_t ktx2_emit_empty_dfd(uint8_t *out)
 
 /* Dispatch a DFD for the given VkFormat.  Returns 0 if unrecognized
  * (caller falls back to empty DFD with a warning). */
-static size_t ktx2_emit_dfd_for(VkFormat fmt, uint8_t *out, size_t out_cap)
+static size_t ktx2_emit_dfd_for(VkFormat fmt, uint8_t *out)
 {
-   (void)out_cap;
    switch (fmt)
    {
       /* 1-channel formats */
@@ -306,8 +309,8 @@ static size_t ktx2_emit_dfd_for(VkFormat fmt, uint8_t *out, size_t out_cap)
       case VK_FORMAT_R32G32B32A32_SFLOAT: return ktx2_emit_dfd_basic(out, 4, 32, true,  true,  false, false, false);
 
       /* Packed formats */
-      case VK_FORMAT_A2B10G10R10_UNORM_PACK32: return ktx2_emit_dfd_a2b10g10r10(out, false);
-      case VK_FORMAT_A2B10G10R10_UINT_PACK32:  return ktx2_emit_dfd_a2b10g10r10(out, true);
+      case VK_FORMAT_A2B10G10R10_UNORM_PACK32: return ktx2_emit_dfd_a2b10g10r10(out);
+      case VK_FORMAT_A2B10G10R10_UINT_PACK32:  return ktx2_emit_dfd_a2b10g10r10(out);
       case VK_FORMAT_B10G11R11_UFLOAT_PACK32:  return ktx2_emit_dfd_b10g11r11_ufloat(out);
 
       default:                                  return 0;
@@ -443,7 +446,7 @@ bool ktx2_write_file(const char *out_path, const ktx2_write_params_t *p)
    level_index_offset = 12 + KTX2_HEADER_SIZE;
    dfd_offset         = level_index_offset + KTX2_LEVEL_INDEX_SIZE;
 
-   dfd_len = ktx2_emit_dfd_for(p->vk_format, dfd_buf, sizeof dfd_buf);
+   dfd_len = ktx2_emit_dfd_for(p->vk_format, dfd_buf);
    if (dfd_len == 0)
    {
       RARCH_WARN("[KTX2] No DFD entry for VkFormat %d; writing empty DFD.\n",
