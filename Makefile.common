@@ -1734,6 +1734,7 @@ ifeq ($(HAVE_VULKAN), 1)
 
    OBJ += gfx/drivers/vulkan.o \
           gfx/common/vulkan_common.o \
+          gfx/drivers/ktx2_writer.o \
           $(LIBRETRO_COMM_DIR)/vulkan/vulkan_symbol_wrapper.o
 
    ifeq ($(HAVE_SLANG), 1)
@@ -2958,5 +2959,20 @@ $(warning Windows NT version macro (_WIN32_WINNT) is not defined.)
 endif
 
 endif
+
+# Standalone unit test for the KTX 2.0 writer.  Opt-in:
+#    make -f Makefile.common ktx2_writer_test
+# (or invoke directly via the top-level Makefile if it includes this.)
+# Compiles outside RetroArch's build context — uses Homebrew's Vulkan
+# headers on macOS, falls back to system headers on Linux.
+KTX2_WRITER_TEST_INC := -I/opt/homebrew/opt/vulkan-headers/include
+KTX2_WRITER_TEST_INC += -I/usr/include
+.PHONY: ktx2_writer_test
+ktx2_writer_test:
+	@$(CC) -std=c99 -Wall -Wextra -O0 -g \
+	   -I. $(KTX2_WRITER_TEST_INC) \
+	   tests/ktx2_writer_test.c gfx/drivers/ktx2_writer.c \
+	   -o /tmp/ktx2_writer_test
+	@/tmp/ktx2_writer_test
 
 ##################################
