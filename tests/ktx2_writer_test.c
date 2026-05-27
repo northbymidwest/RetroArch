@@ -16,6 +16,19 @@ static int failures = 0;
    } \
 } while (0)
 
+static void test_bytes_per_texel(void)
+{
+   CHECK(ktx2_bytes_per_texel(VK_FORMAT_R8G8B8A8_UNORM)         == 4);
+   CHECK(ktx2_bytes_per_texel(VK_FORMAT_R8G8B8A8_SRGB)          == 4);
+   CHECK(ktx2_bytes_per_texel(VK_FORMAT_B8G8R8A8_UNORM)         == 4);
+   CHECK(ktx2_bytes_per_texel(VK_FORMAT_B8G8R8A8_SRGB)          == 4);
+   CHECK(ktx2_bytes_per_texel(VK_FORMAT_R16G16B16A16_UNORM)     == 8);
+   CHECK(ktx2_bytes_per_texel(VK_FORMAT_R16G16B16A16_SFLOAT)    == 8);
+   CHECK(ktx2_bytes_per_texel(VK_FORMAT_A2B10G10R10_UNORM_PACK32) == 4);
+   CHECK(ktx2_bytes_per_texel(VK_FORMAT_B10G11R11_UFLOAT_PACK32)  == 4);
+   CHECK(ktx2_bytes_per_texel(VK_FORMAT_UNDEFINED) == 0);
+}
+
 static void test_identifier_bytes(void)
 {
    /* KTX 2.0 spec §3.1 — fixed identifier */
@@ -28,6 +41,7 @@ static void test_identifier_bytes(void)
 
 int main(void)
 {
+   test_bytes_per_texel();
    test_identifier_bytes();
    if (failures)
    {

@@ -14,8 +14,21 @@ const uint8_t ktx2_identifier[12] = {
 
 size_t ktx2_bytes_per_texel(VkFormat fmt)
 {
-   (void)fmt;
-   return 0;  /* filled in Task 2 */
+   switch (fmt)
+   {
+      case VK_FORMAT_R8G8B8A8_UNORM:
+      case VK_FORMAT_R8G8B8A8_SRGB:
+      case VK_FORMAT_B8G8R8A8_UNORM:
+      case VK_FORMAT_B8G8R8A8_SRGB:
+      case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+      case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
+         return 4;
+      case VK_FORMAT_R16G16B16A16_UNORM:
+      case VK_FORMAT_R16G16B16A16_SFLOAT:
+         return 8;
+      default:
+         return 0;
+   }
 }
 
 bool ktx2_write_file(const char *out_path, const ktx2_write_params_t *p)
