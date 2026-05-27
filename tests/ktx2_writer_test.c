@@ -80,21 +80,37 @@ static void test_header_layout(void)
    CHECK(f != NULL);
    if (!f) return;
 
+   /* File should be exactly 12 (identifier) + 68 (header) = 80 bytes;
+    * DFD/KVD/image-data come in later tasks. */
+   fseek(f, 0, SEEK_END);
+   long file_size = ftell(f);
+   CHECK(file_size == 80);
+   fseek(f, 0, SEEK_SET);
+
    uint8_t id[12];
    CHECK(fread(id, 1, 12, f) == 12);
    CHECK(memcmp(id, ktx2_identifier, 12) == 0);
 
-   uint32_t hdr[17];
-   CHECK(fread(hdr, sizeof(uint32_t), 17, f) == 17);
-   CHECK(hdr[0]  == VK_FORMAT_R8G8B8A8_UNORM);   /* vkFormat */
-   CHECK(hdr[1]  == 1);                          /* typeSize */
-   CHECK(hdr[2]  == 4);                          /* pixelWidth */
-   CHECK(hdr[3]  == 4);                          /* pixelHeight */
-   CHECK(hdr[4]  == 0);                          /* pixelDepth */
-   CHECK(hdr[5]  == 0);                          /* layerCount */
-   CHECK(hdr[6]  == 1);                          /* faceCount */
-   CHECK(hdr[7]  == 1);                          /* levelCount */
-   CHECK(hdr[8]  == 0);                          /* supercompressionScheme */
+   uint32_t hdr32[13];
+   CHECK(fread(hdr32, sizeof(uint32_t), 13, f) == 13);
+   CHECK(hdr32[0]  == VK_FORMAT_R8G8B8A8_UNORM);   /* vkFormat */
+   CHECK(hdr32[1]  == 1);                          /* typeSize */
+   CHECK(hdr32[2]  == 4);                          /* pixelWidth */
+   CHECK(hdr32[3]  == 4);                          /* pixelHeight */
+   CHECK(hdr32[4]  == 0);                          /* pixelDepth */
+   CHECK(hdr32[5]  == 0);                          /* layerCount */
+   CHECK(hdr32[6]  == 1);                          /* faceCount */
+   CHECK(hdr32[7]  == 1);                          /* levelCount */
+   CHECK(hdr32[8]  == 0);                          /* supercompressionScheme */
+   CHECK(hdr32[9]  == 0);                          /* dfdByteOffset (T4) */
+   CHECK(hdr32[10] == 0);                          /* dfdByteLength */
+   CHECK(hdr32[11] == 0);                          /* kvdByteOffset */
+   CHECK(hdr32[12] == 0);                          /* kvdByteLength */
+
+   uint64_t hdr64[2];
+   CHECK(fread(hdr64, sizeof(uint64_t), 2, f) == 2);
+   CHECK(hdr64[0] == 0);                           /* sgdByteOffset */
+   CHECK(hdr64[1] == 0);                           /* sgdByteLength */
 
    fclose(f);
    remove(path);

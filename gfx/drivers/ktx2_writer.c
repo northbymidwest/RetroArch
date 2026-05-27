@@ -20,7 +20,8 @@ const uint8_t ktx2_identifier[12] = {
 
 /* KTX 2.0 header layout, on disk all little-endian uint32 / uint64.
  * Identifier (12 bytes) is written separately; this struct covers the
- * 80 bytes that follow it (including the 16-byte sgd offset/length). */
+ * 68 bytes that follow it: 13 × uint32 (52 bytes) + 2 × uint64 (16 bytes).
+ * Fields are written individually to avoid struct padding issues. */
 typedef struct
 {
    uint32_t vk_format;
@@ -40,7 +41,7 @@ typedef struct
    uint64_t sgd_byte_length;
 } ktx2_header_t;
 
-#define KTX2_HEADER_SIZE        80   /* identifier excluded */
+#define KTX2_HEADER_SIZE        68   /* identifier excluded; matches KTX 2.0 spec §3 */
 #define KTX2_LEVEL_INDEX_SIZE   24   /* per level */
 
 static uint32_t ktx2_type_size_for(VkFormat fmt)
@@ -172,10 +173,27 @@ bool ktx2_write_file(const char *out_path, const ktx2_write_params_t *p)
    hdr.face_count              = 1;
    hdr.level_count             = 1;
    hdr.supercompression_scheme = 0;
-   /* Offsets/lengths for DFD/KVD/SGD: filled in Tasks 4-6. For now zero
-    * so the header bytes are deterministic and the structural test passes. */
+   /* dfd/kvd/sgd offsets and lengths populated in T4-T6.  Leave at 0. */
 
-   if (fwrite(&hdr, 1, KTX2_HEADER_SIZE, f) != KTX2_HEADER_SIZE)
+   /* Write each field individually so we are not subject to compiler
+    * struct padding decisions; spec layout is 13 × uint32 + 2 × uint64
+    * = 68 bytes immediately following the identifier, little-endian.
+    * assumes little-endian host (Vulkan video driver is LE-only) */
+   if (   fwrite(&hdr.vk_format,               4, 1, f) != 1
+       || fwrite(&hdr.type_size,               4, 1, f) != 1
+       || fwrite(&hdr.pixel_width,             4, 1, f) != 1
+       || fwrite(&hdr.pixel_height,            4, 1, f) != 1
+       || fwrite(&hdr.pixel_depth,             4, 1, f) != 1
+       || fwrite(&hdr.layer_count,             4, 1, f) != 1
+       || fwrite(&hdr.face_count,              4, 1, f) != 1
+       || fwrite(&hdr.level_count,             4, 1, f) != 1
+       || fwrite(&hdr.supercompression_scheme, 4, 1, f) != 1
+       || fwrite(&hdr.dfd_byte_offset,         4, 1, f) != 1
+       || fwrite(&hdr.dfd_byte_length,         4, 1, f) != 1
+       || fwrite(&hdr.kvd_byte_offset,         4, 1, f) != 1
+       || fwrite(&hdr.kvd_byte_length,         4, 1, f) != 1
+       || fwrite(&hdr.sgd_byte_offset,         8, 1, f) != 1
+       || fwrite(&hdr.sgd_byte_length,         8, 1, f) != 1)
       goto io_fail;
 
    fclose(f);
