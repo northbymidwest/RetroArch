@@ -526,6 +526,8 @@ VIDEO DRIVER
 
 #ifdef HAVE_VULKAN
 #include "../gfx/drivers/vulkan.c"
+#include "../gfx/drivers/ktx2_writer.c"
+#include "../gfx/drivers/vulkan_pass_dump.c"
 #endif
 
 #if defined(HAVE_PLAIN_DRM)
