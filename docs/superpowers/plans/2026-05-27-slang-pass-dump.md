@@ -505,7 +505,9 @@ static void test_level_index_and_dfd(void)
    /* DFD must start immediately after level index (one entry of 24 bytes).
     * level index begins at file offset 12 + 80 = 92.  DFD offset is the
     * byte offset from start of file. */
-   CHECK(dfd_off == 92 + 24);
+   /* level index begins at file offset 12 + 68 = 80; DFD follows the
+    * 24-byte level index entry, so dfd_off must be 80 + 24 = 104. */
+   CHECK(dfd_off == 80 + 24);
    CHECK(dfd_len  > 0);
    CHECK(sgd_off == 0 && sgd_len == 0);
 

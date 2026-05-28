@@ -6441,7 +6441,7 @@ static bool vulkan_frame(void *data, const void *frame,
             filter_chain,
             _settings ? _settings->paths.directory_screenshot : "",
             _core_name,
-            _settings ? _settings->paths.path_shader : "");
+            _rls ? _rls->runtime_shader_preset_path : "");
    }
 
 #ifdef VULKAN_HDR_SWAPCHAIN
