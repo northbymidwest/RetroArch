@@ -12,6 +12,8 @@
 
 #include "../common/vulkan_common.h"
 #include "../../verbosity.h"
+#include "../../version.h"
+#include "../../version_git.h"
 #include "ktx2_writer.h"
 
 /* Per-image capture state. */
@@ -25,10 +27,11 @@ typedef struct
    VkBuffer        staging;
    VkDeviceMemory  memory;
    void           *mapped;
-   char           *out_filename;    /* sanitized, basename only */
-   char            display_name[64];/* short name for manifest/KVD JSON */
-   int             pass_index;      /* -1 for Original, num_passes-1 for final */
-   bool            recorded;        /* set when blit emitted onto cmd */
+   char           *out_filename;      /* sanitized, basename only */
+   char            source_shader[256];/* raw pass name before sanitization */
+   char            display_name[64];  /* short name for manifest/KVD JSON */
+   int             pass_index;        /* -1 for Original, num_passes-1 for final */
+   bool            recorded;          /* set when blit emitted onto cmd */
 } pass_image_t;
 
 struct vulkan_pass_dump
@@ -333,6 +336,7 @@ vulkan_pass_dump_t *vulkan_pass_dump_arm(
          goto fail;
       snprintf(p->out_filename, 32, "00_original.ktx2");
       strlcpy(p->display_name, "original", sizeof p->display_name);
+      p->source_shader[0] = '\0';   /* Original has no shader source */
    }
 
    /* Slots 1..offscreen_count = offscreen passes. */
@@ -358,6 +362,7 @@ vulkan_pass_dump_t *vulkan_pass_dump_arm(
       }
 
       raw = vulkan_filter_chain_get_pass_name(chain, i);
+      strlcpy(p->source_shader, raw ? raw : "", sizeof p->source_shader);
       sanitize_pass_name(raw, p->display_name, sizeof p->display_name);
       p->out_filename = (char*)malloc(96);
       if (!p->out_filename)
@@ -534,6 +539,7 @@ void vulkan_pass_dump_record_final(
    raw = chain
       ? vulkan_filter_chain_get_pass_name(chain, dump->offscreen_count)
       : "";
+   strlcpy(p->source_shader, raw ? raw : "", sizeof p->source_shader);
    sanitize_pass_name(raw, p->display_name, sizeof p->display_name);
 
    p->out_filename = (char*)malloc(96);
@@ -563,11 +569,14 @@ static void compose_kvd_for(const vulkan_pass_dump_t *d, const pass_image_t *p,
       char *json_out, size_t json_size)
 {
    snprintf(json_out, json_size,
-         "{\"pass\":%d,\"name\":\"%s\","
+         "{\"pass\":%d,\"name\":\"%s\",\"source_shader\":%s%s%s,"
          "\"input_extent\":[%u,%u],\"output_extent\":[%u,%u],"
          "\"frame_index\":%llu,\"capture_time\":\"%s\"}",
          p->pass_index,
          p->display_name[0] ? p->display_name : "unnamed",
+         p->source_shader[0] ? "\"" : "",
+         p->source_shader[0] ? p->source_shader : "null",
+         p->source_shader[0] ? "\"" : "",
          d->images[0].extent.width, d->images[0].extent.height,
          p->extent.width, p->extent.height,
          (unsigned long long)d->frame_count,
@@ -603,11 +612,44 @@ static bool write_one_ktx2(const vulkan_pass_dump_t *d, const pass_image_t *p)
    return ktx2_write_file(path, &wp);
 }
 
+/* Escape a string for inclusion in JSON.  Writes at most cap-1 bytes plus
+ * terminator to out.  Handles '"', '\', and control characters; passes
+ * everything else through as-is. */
+static void json_escape(const char *in, char *out, size_t cap)
+{
+   size_t j = 0;
+   if (!in) in = "";
+   for (size_t i = 0; in[i] && j + 2 < cap; i++)
+   {
+      unsigned char c = (unsigned char)in[i];
+      if (c == '"' || c == '\\')
+      {
+         out[j++] = '\\';
+         out[j++] = c;
+      }
+      else if (c < 0x20)
+      {
+         static const char hex[] = "0123456789ABCDEF";
+         if (j + 6 >= cap) break;
+         out[j++] = '\\'; out[j++] = 'u';
+         out[j++] = '0';  out[j++] = '0';
+         out[j++] = hex[(c >> 4) & 0xF];
+         out[j++] = hex[c & 0xF];
+      }
+      else
+         out[j++] = (char)c;
+   }
+   out[j] = '\0';
+}
+
 static void write_manifest(const vulkan_pass_dump_t *d)
 {
    char path[2048];
+   char preset_escaped[4096];
    FILE *f;
    unsigned i;
+
+   json_escape(d->preset_path, preset_escaped, sizeof preset_escaped);
 
    fill_pathname_join_special(path, d->out_dir, "manifest.json", sizeof path);
    f = fopen(path, "wb");
@@ -621,13 +663,21 @@ static void write_manifest(const vulkan_pass_dump_t *d)
          "{\n"
          "  \"schema\": 1,\n"
          "  \"video_driver\": \"vulkan\",\n"
+         "  \"retroarch_version\": \"%s\",\n"
+         "  \"retroarch_sha\": \"%s\",\n"
          "  \"preset_path\": \"%s\",\n"
          "  \"num_passes\": %u,\n"
          "  \"swapchain_format\": \"%s\",\n"
          "  \"frame_index\": %llu,\n"
          "  \"capture_time\": \"%s\",\n"
          "  \"files\": [\n",
-         d->preset_path[0] ? d->preset_path : "",
+         PACKAGE_VERSION,
+#ifdef HAVE_GIT_VERSION
+         retroarch_git_version,
+#else
+         "",
+#endif
+         preset_escaped[0] ? preset_escaped : "",
          d->offscreen_count + 1u,
          d->swapchain_format_name[0] ? d->swapchain_format_name : "VkFormat(unknown)",
          (unsigned long long)d->frame_count,

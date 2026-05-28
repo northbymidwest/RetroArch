@@ -394,7 +394,12 @@ typedef struct vk
     * consumed at the next frame boundary. */
    vulkan_pass_dump_t *pass_dump;
    bool                pass_dump_arm_pending;
-   bool                pass_dump_unsupported_logged;
+
+   /* Deferred final-pass capture parameters.  Populated inside the render
+    * pass (where we know the target image/format), then consumed by
+    * vulkan_pass_dump_record_final() AFTER the render pass closes. */
+   VkImage             pass_dump_final_image;
+   VkFormat            pass_dump_final_format;
 } vk_t;
 
 typedef struct
@@ -6840,16 +6845,24 @@ static bool vulkan_frame(void *data, const void *frame,
             (vulkan_filter_chain_t*)filter_chain, vk->cmd,
             &vk->vk_vp, vk->mvp.data);
 
+      /* Cache the final-pass capture target BEFORE the HDR offscreen path
+       * can change `backbuffer`.  The actual record_final() call is deferred
+       * until after the render pass closes (Vulkan spec §7.4 forbids
+       * vkCmdPipelineBarrier / vkCmdCopyImageToBuffer inside a render pass). */
       if (vk->pass_dump)
       {
-         VkExtent2D _swap_ext;
-         _swap_ext.width  = vk->context->swapchain_width;
-         _swap_ext.height = vk->context->swapchain_height;
-         vulkan_pass_dump_record_final(vk->pass_dump, vk->cmd,
-               filter_chain,
-               backbuffer->image,
-               vk->context->swapchain_format,
-               _swap_ext);
+#ifdef VULKAN_HDR_SWAPCHAIN
+         if (use_offscreen_buffer)
+         {
+            vk->pass_dump_final_image  = vk->offscreen_buffer.image;
+            vk->pass_dump_final_format = VK_FORMAT_B8G8R8A8_UNORM;
+         }
+         else
+#endif
+         {
+            vk->pass_dump_final_image  = backbuffer->image;
+            vk->pass_dump_final_format = vk->context->swapchain_format;
+         }
       }
 
 #ifdef VULKAN_HDR_SWAPCHAIN
@@ -6864,6 +6877,24 @@ static bool vulkan_frame(void *data, const void *frame,
          {
             vkCmdEndRenderPass(vk->cmd);
             end_pass = false;
+
+            /* HDR-offscreen path: emit final-pass dump NOW, while the offscreen
+             * buffer is still COLOR_ATTACHMENT_OPTIMAL.  The dump module does a
+             * COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC -> COLOR_ATTACHMENT_OPTIMAL
+             * round-trip, leaving the image in COLOR_ATTACHMENT_OPTIMAL for the
+             * SHADER_READ_ONLY_OPTIMAL transition that follows. */
+            if (vk->pass_dump && vk->pass_dump_final_image != VK_NULL_HANDLE)
+            {
+               VkExtent2D _swap_ext;
+               _swap_ext.width  = vk->context->swapchain_width;
+               _swap_ext.height = vk->context->swapchain_height;
+               vulkan_pass_dump_record_final(vk->pass_dump, vk->cmd,
+                     (vulkan_filter_chain_t*)filter_chain,
+                     vk->pass_dump_final_image,
+                     vk->pass_dump_final_format,
+                     _swap_ext);
+               vk->pass_dump_final_image = VK_NULL_HANDLE;
+            }
          }
 
          backbuffer = &vk->backbuffers[swapchain_index];
@@ -7022,6 +7053,23 @@ static bool vulkan_frame(void *data, const void *frame,
       vk->flags &= ~VK_FLAG_SDR_PIPELINE;
 #endif
       if(end_main_pass) vkCmdEndRenderPass(vk->cmd);
+
+      /* Non-HDR path (and HDR-no-offscreen path): emit final-pass dump now
+       * that we're outside the render pass.  The once-per-frame guard
+       * (pass_dump_final_image = VK_NULL_HANDLE after the HDR-offscreen emit
+       * above) ensures this runs at most once per dump. */
+      if (vk->pass_dump && vk->pass_dump_final_image != VK_NULL_HANDLE)
+      {
+         VkExtent2D _swap_ext;
+         _swap_ext.width  = vk->context->swapchain_width;
+         _swap_ext.height = vk->context->swapchain_height;
+         vulkan_pass_dump_record_final(vk->pass_dump, vk->cmd,
+               (vulkan_filter_chain_t*)filter_chain,
+               vk->pass_dump_final_image,
+               vk->pass_dump_final_format,
+               _swap_ext);
+         vk->pass_dump_final_image = VK_NULL_HANDLE;
+      }
 
 #ifdef VULKAN_HDR_SWAPCHAIN
       /* Copy over back buffer to swap chain render targets */
