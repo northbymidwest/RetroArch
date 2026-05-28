@@ -6652,6 +6652,7 @@ static enum runloop_state_enum runloop_check_state(
 #ifdef HAVE_SCREENSHOTS
    /* Check screenshot hotkey */
    HOTKEY_CHECK(RARCH_SCREENSHOT, CMD_EVENT_TAKE_SCREENSHOT, true, NULL);
+   HOTKEY_CHECK(RARCH_DUMP_SLANG_PASSES, CMD_EVENT_DUMP_SLANG_PASSES, true, NULL);
 #endif
 
 #ifdef HAVE_CHEEVOS

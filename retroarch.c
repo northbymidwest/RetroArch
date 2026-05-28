@@ -3766,6 +3766,9 @@ bool command_event(enum event_command cmd, void *data)
          }
 #endif
          break;
+      case CMD_EVENT_DUMP_SLANG_PASSES:
+         video_driver_dump_slang_passes();
+         break;
       case CMD_EVENT_UNLOAD_CORE:
          {
             bool load_dummy_core            = data ? *(bool*)data : true;

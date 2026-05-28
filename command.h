@@ -80,6 +80,7 @@ enum event_command
    CMD_EVENT_RAM_STATE_TO_FILE,
    /* Takes screenshot. */
    CMD_EVENT_TAKE_SCREENSHOT,
+   CMD_EVENT_DUMP_SLANG_PASSES,
    /* Quits RetroArch. */
    CMD_EVENT_QUIT,
    /* Reinitialize all drivers. */
