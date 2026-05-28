@@ -3998,6 +3998,14 @@ MSG_HASH(
    "Captures an image of the current content."
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_INPUT_META_DUMP_SLANG_PASSES,
+   "Dump Slang Shader Passes"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_INPUT_META_DUMP_SLANG_PASSES,
+   "Write each slang shader pass's output texture to disk as KTX2 files. Vulkan video driver only."
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_META_RECORDING_TOGGLE,
    "Recording (Toggle)"
    )

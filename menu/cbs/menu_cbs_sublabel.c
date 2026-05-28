@@ -476,6 +476,7 @@ DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_input_meta_cheat_index_plus,      ME
 DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_input_meta_cheat_index_minus,     MENU_ENUM_SUBLABEL_INPUT_META_CHEAT_INDEX_MINUS)
 #endif
 DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_input_meta_screenshot,            MENU_ENUM_SUBLABEL_INPUT_META_SCREENSHOT)
+DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_input_meta_dump_slang_passes,    MENU_ENUM_SUBLABEL_INPUT_META_DUMP_SLANG_PASSES)
 DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_input_meta_recording_toggle,      MENU_ENUM_SUBLABEL_INPUT_META_RECORDING_TOGGLE)
 DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_input_meta_streaming_toggle,      MENU_ENUM_SUBLABEL_INPUT_META_STREAMING_TOGGLE)
 
@@ -2433,6 +2434,9 @@ int menu_cbs_init_bind_sublabel(menu_file_list_cbs_t *cbs,
 
             case RARCH_SCREENSHOT:
                BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_input_meta_screenshot);
+               return 0;
+            case RARCH_DUMP_SLANG_PASSES:
+               BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_input_meta_dump_slang_passes);
                return 0;
             case RARCH_RECORDING_TOGGLE:
                BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_input_meta_recording_toggle);
