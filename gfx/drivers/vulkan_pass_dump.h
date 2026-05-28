@@ -28,6 +28,11 @@ typedef struct vulkan_pass_dump_ctx
    VkPhysicalDevice                        gpu;
    const VkPhysicalDeviceMemoryProperties *mem_props;
    uint64_t                                frame_count;
+   /* The chain's input_texture.format is VK_FORMAT_UNDEFINED for SW-rendered
+    * cores (the chain doesn't need it; the underlying texture handles
+    * format internally).  This hint lets the dump module record the real
+    * format in KTX2 headers anyway.  Set to VK_FORMAT_UNDEFINED to disable. */
+   VkFormat                                original_format_hint;
 } vulkan_pass_dump_ctx_t;
 
 vulkan_pass_dump_t *vulkan_pass_dump_arm(

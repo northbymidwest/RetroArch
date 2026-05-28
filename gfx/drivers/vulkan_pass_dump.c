@@ -318,10 +318,23 @@ vulkan_pass_dump_t *vulkan_pass_dump_arm(
       p->prev_layout  = vulkan_filter_chain_get_original_layout(chain);
       p->pass_index   = -1;
 
+      /* The chain sets input_texture.format = VK_FORMAT_UNDEFINED for
+       * software-rendered cores (the chain doesn't use the field; the
+       * underlying texture carries the format internally).  Caller passes
+       * the real format via ctx->original_format_hint so the KTX2 header
+       * records the actual format. */
+      if (p->format == VK_FORMAT_UNDEFINED
+            && ctx->original_format_hint != VK_FORMAT_UNDEFINED)
+      {
+         RARCH_LOG("[Pass Dump] Chain returned UNDEFINED for Original format; using hint %d.\n",
+               (int)ctx->original_format_hint);
+         p->format = ctx->original_format_hint;
+      }
+
       bpt = ktx2_bytes_per_texel(p->format);
       if (bpt == 0)
       {
-         RARCH_WARN("[Pass Dump] Unknown Original VkFormat %d.\n", (int)p->format);
+         RARCH_WARN("[Pass Dump] Unknown Original VkFormat %d; assuming 4 bpt.\n", (int)p->format);
          bpt = 4;  /* best-effort */
       }
       p->staging_size = (VkDeviceSize)p->extent.width * p->extent.height * bpt;

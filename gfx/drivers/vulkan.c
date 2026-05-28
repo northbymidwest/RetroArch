@@ -52,6 +52,7 @@
 #include "vulkan_pass_dump.h"
 
 #include "../../configuration.h"
+#include "../../defaults.h"
 #ifdef HAVE_REWIND
 #include "../../state_manager.h"
 #endif
@@ -394,6 +395,12 @@ typedef struct vk
     * consumed at the next frame boundary. */
    vulkan_pass_dump_t *pass_dump;
    bool                pass_dump_arm_pending;
+
+   /* Real format of the input texture handed to the chain this frame.
+    * The chain field input_texture.format is VK_FORMAT_UNDEFINED for
+    * software-rendered cores (signals "no reconfigure needed"); this
+    * captures the actual format so the dump's KTX2 header is correct. */
+   VkFormat            pass_dump_input_format_hint;
 
    /* Deferred final-pass capture parameters.  Populated inside the render
     * pass (where we know the target image/format), then consumed by
@@ -6417,32 +6424,8 @@ static bool vulkan_frame(void *data, const void *frame,
    if (!filter_chain && vk->filter_chain_default)
       filter_chain = vk->filter_chain_default;
 
-   /* Arm pass dump if requested. */
-   if (vk->pass_dump_arm_pending)
-   {
-      settings_t *_settings  = config_get_ptr();
-      runloop_state_t *_rls  = runloop_state_get_ptr();
-      vulkan_pass_dump_ctx_t _dump_ctx;
-      const char *_core_name;
-
-      vk->pass_dump_arm_pending = false;
-
-      _core_name = (_rls && _rls->system.info.library_name && _rls->system.info.library_name[0])
-         ? _rls->system.info.library_name
-         : "core";
-
-      _dump_ctx.device      = vk->context->device;
-      _dump_ctx.gpu         = vk->context->gpu;
-      _dump_ctx.mem_props   = &vk->context->memory_properties;
-      _dump_ctx.frame_count = (uint64_t)vk->context->current_frame_index;
-
-      vk->pass_dump = vulkan_pass_dump_arm(
-            &_dump_ctx,
-            filter_chain,
-            _settings ? _settings->paths.directory_screenshot : "",
-            _core_name,
-            _rls ? _rls->runtime_shader_preset_path : "");
-   }
+   /* Arm pass dump moved to after vulkan_filter_chain_set_input_texture
+    * below so the chain has this frame's input state. */
 
 #ifdef VULKAN_HDR_SWAPCHAIN
    /* Use the offscreen buffer when the shader's output format doesn't match
@@ -6719,6 +6702,7 @@ static bool vulkan_frame(void *data, const void *frame,
 
             /* The format can change on a whim. */
             input.format       = vk->hw.image->create_info.format;
+            vk->pass_dump_input_format_hint = input.format;
          }
          else
          {
@@ -6731,6 +6715,7 @@ static bool vulkan_frame(void *data, const void *frame,
             input.view         = vk->default_texture.view;
             input.layout       = vk->default_texture.layout;
             input.format       = vk->default_texture.format;
+            vk->pass_dump_input_format_hint = input.format;
          }
 
          vk->hw.last_width     = input.width;
@@ -6757,10 +6742,59 @@ static bool vulkan_frame(void *data, const void *frame,
          input.width  = tex->width;
          input.height = tex->height;
          input.format = VK_FORMAT_UNDEFINED; /* It's already configured. */
+         /* For the pass-dump debug feature: the chain stores UNDEFINED
+          * (signals "no reconfigure needed"), but we need the real
+          * format for the KTX2 header. */
+         vk->pass_dump_input_format_hint = tex->format;
       }
 
       vulkan_filter_chain_set_input_texture((vulkan_filter_chain_t*)
             filter_chain, &input);
+   }
+
+   /* Arm pass dump now that the chain has this frame's input texture. */
+   if (vk->pass_dump_arm_pending)
+   {
+      settings_t *_settings  = config_get_ptr();
+      runloop_state_t *_rls  = runloop_state_get_ptr();
+      vulkan_pass_dump_ctx_t _dump_ctx;
+      const char *_core_name;
+      const char *_screenshot_dir;
+
+      vk->pass_dump_arm_pending = false;
+
+      _core_name = (_rls && _rls->system.info.library_name && _rls->system.info.library_name[0])
+         ? _rls->system.info.library_name
+         : "core";
+
+      /* If the user hasn't configured screenshot_directory, fall back to
+       * RetroArch's default screenshots dir (typically
+       * ~/Library/Application Support/RetroArch/screenshots on macOS). */
+      _screenshot_dir = (_settings && _settings->paths.directory_screenshot[0])
+         ? _settings->paths.directory_screenshot
+         : g_defaults.dirs[DEFAULT_DIR_SCREENSHOT];
+
+      _dump_ctx.device               = vk->context->device;
+      _dump_ctx.gpu                  = vk->context->gpu;
+      _dump_ctx.mem_props            = &vk->context->memory_properties;
+      _dump_ctx.frame_count          = (uint64_t)vk->context->current_frame_index;
+      _dump_ctx.original_format_hint = vk->pass_dump_input_format_hint;
+
+      RARCH_LOG("[Pass Dump] Arming: chain=%p core=%s preset=%s screenshot_dir=%s format_hint=%d\n",
+            (void*)filter_chain, _core_name,
+            _rls ? _rls->runtime_shader_preset_path : "",
+            _screenshot_dir ? _screenshot_dir : "(null)",
+            (int)vk->pass_dump_input_format_hint);
+
+      vk->pass_dump = vulkan_pass_dump_arm(
+            &_dump_ctx,
+            filter_chain,
+            _screenshot_dir ? _screenshot_dir : "",
+            _core_name,
+            _rls ? _rls->runtime_shader_preset_path : "");
+
+      RARCH_LOG("[Pass Dump] Arm result: %s\n",
+            vk->pass_dump ? "OK" : "FAILED (see warnings above)");
    }
 
    vulkan_set_viewport(vk, width, height, false, true);

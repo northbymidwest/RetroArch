@@ -3402,6 +3402,8 @@ void video_driver_dump_slang_passes(void)
    static bool already_warned         = false;
    video_driver_state_t *video_st     = video_state_get_ptr();
 
+   RARCH_LOG("[Pass Dump] Hotkey received.\n");
+
    if (!video_st || !video_st->current_video || !video_st->data)
    {
       RARCH_WARN("[Pass Dump] No active video driver.\n");
@@ -3411,6 +3413,7 @@ void video_driver_dump_slang_passes(void)
 #if defined(HAVE_VULKAN)
    if (video_st->current_video == &video_vulkan)
    {
+      RARCH_LOG("[Pass Dump] Dispatching to Vulkan driver.\n");
       vulkan_dump_slang_passes_request(video_st->data);
       return;
    }
