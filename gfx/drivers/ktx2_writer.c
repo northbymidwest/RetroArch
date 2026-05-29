@@ -65,8 +65,25 @@ typedef struct
 #define KDF_CHANNEL_RGBSDA_BLUE                      2
 #define KDF_CHANNEL_RGBSDA_ALPHA                     15
 
-#define KTX2_IMAGE_ALIGNMENT                         16
 #define KTX2_DFD_MAX_BYTES                           256
+
+/* Per KTX 2.0 spec §3.9.2, mipPadding aligns level data to
+ * lcm(texelBlockSize, 4) bytes for uncompressed formats with no
+ * supercompression. For our format set this is 4, 8, or 16 (never
+ * larger than the texel size). */
+static uint64_t ktx2_image_alignment_for(VkFormat fmt)
+{
+   size_t texel = ktx2_bytes_per_texel(fmt);
+   if (texel == 0)
+      return 4;   /* unknown format fallback */
+   /* lcm(texel, 4). For texel ∈ {1,2,4}: result = 4.
+    * For texel = 8: result = 8. For texel = 16: result = 16. */
+   if (texel <= 4)
+      return 4;
+   /* All remaining supported sizes (8, 16) are themselves multiples of 4,
+    * so lcm(texel, 4) = texel. */
+   return (uint64_t)texel;
+}
 
 /* Write one 16-byte sample block. */
 static size_t ktx2_emit_sample(uint8_t *out,
@@ -495,7 +512,8 @@ bool ktx2_write_file(const char *out_path, const ktx2_write_params_t *p)
 
    kvd_offset    = dfd_offset + dfd_len;
    kvd_len       = ktx2_kvd_total_size(p->kv_pairs, p->kv_pair_count);
-   image_offset  = ktx2_align_up(kvd_offset + kvd_len, KTX2_IMAGE_ALIGNMENT);
+   image_offset  = ktx2_align_up(kvd_offset + kvd_len,
+         ktx2_image_alignment_for(p->vk_format));
 
    memset(&hdr, 0, sizeof hdr);
    hdr.vk_format               = p->vk_format;

@@ -164,7 +164,7 @@ static void test_level_index_and_dfd(void)
    CHECK(fread(&lvl_unc, 8, 1, f) == 1);
    CHECK(lvl_len == 4 * 4 * 4);
    CHECK(lvl_unc == lvl_len);
-   CHECK(lvl_off % 16 == 0);    /* image alignment */
+   CHECK(lvl_off % 4 == 0);     /* R8G8B8A8 → lcm(4,4) = 4 byte alignment */
 
    /* Read first 4 bytes of DFD: total DFD byte length (including itself). */
    fseek(f, (long)dfd_off, SEEK_SET);
@@ -432,7 +432,7 @@ static void test_image_data_roundtrip(void)
    CHECK(fread(&lvl_off, 8, 1, f) == 1);
    CHECK(fread(&lvl_len, 8, 1, f) == 1);
    CHECK(fread(&lvl_unc, 8, 1, f) == 1);
-   CHECK(lvl_off % 16 == 0);
+   CHECK(lvl_off % 8 == 0);     /* R16G16B16A16 → lcm(8,4) = 8 byte alignment */
    CHECK(lvl_len == sizeof pixels);
 
    uint8_t round[sizeof pixels];
@@ -444,8 +444,69 @@ static void test_image_data_roundtrip(void)
    remove(path);
 }
 
+/* Regression: previously the writer aligned image data to 16 bytes
+ * universally.  Per KTX 2.0 spec §3.9.2, mipPadding aligns to
+ * lcm(texelBlockSize, 4) for uncompressed formats — 4 bytes for 8-bit
+ * formats.  Over-aligning to 16 produced files that ktx-tools rejected
+ * with "Invalid byteOffset in Level Index" when the KVD section ended
+ * at a 4-aligned but not-16-aligned position. */
+static void test_image_alignment_per_format(void)
+{
+   /* Force a KVD whose total bytes leave us at a 4-aligned but not
+    * 16-aligned offset, then verify the level data starts at the
+    * minimal 4-aligned position (not padded up to 16). */
+   const char *path = "/tmp/ktx2_test_align.ktx2";
+   uint8_t pixels[4 * 4 * 4];
+   memset(pixels, 0x33, sizeof pixels);
+
+   /* "RAretroarch" key + a value chosen so kvd ends at a non-16-aligned
+    * offset.  Key is 12 bytes (incl. \0); value of 6 bytes gives entry
+    * size = 4 (len) + 12 + 6 = 22 → padded to 24. */
+   ktx2_kv_pair_t kvs[1] = {
+      { "RAretroarch", "abcde", 6 }
+   };
+
+   ktx2_write_params_t p = {
+      .vk_format     = VK_FORMAT_R8G8B8A8_UNORM,    /* texel=4 → align=4 */
+      .width         = 4, .height = 4,
+      .pixels        = pixels,
+      .pixels_size   = sizeof pixels,
+      .kv_pairs      = kvs,
+      .kv_pair_count = 1,
+   };
+   CHECK(ktx2_write_file(path, &p));
+
+   FILE *f = fopen(path, "rb");
+   CHECK(f != NULL); if (!f) return;
+
+   /* Read DFD offset/length and KVD offset/length from header. */
+   fseek(f, 12 + 9 * 4, SEEK_SET);  /* skip to dfd_byte_offset */
+   uint32_t dfd_off, dfd_len, kvd_off, kvd_len;
+   CHECK(fread(&dfd_off, 4, 1, f) == 1);
+   CHECK(fread(&dfd_len, 4, 1, f) == 1);
+   CHECK(fread(&kvd_off, 4, 1, f) == 1);
+   CHECK(fread(&kvd_len, 4, 1, f) == 1);
+
+   /* Read level 0 byte offset. */
+   fseek(f, 12 + 68, SEEK_SET);
+   uint64_t lvl_off;
+   CHECK(fread(&lvl_off, 8, 1, f) == 1);
+
+   uint64_t kvd_end = (uint64_t)kvd_off + (uint64_t)kvd_len;
+   /* Image alignment for R8G8B8A8 is lcm(4,4) = 4. */
+   CHECK(lvl_off % 4 == 0);
+   /* Critical regression check: image data MUST NOT be padded beyond
+    * the next 4-aligned offset.  Specifically, lvl_off - kvd_end < 4. */
+   CHECK(lvl_off >= kvd_end);
+   CHECK(lvl_off - kvd_end < 4);
+
+   fclose(f);
+   remove(path);
+}
+
 int main(void)
 {
+   test_image_alignment_per_format();
    test_level_index_and_dfd();
    test_dfd_coverage();
    test_dfd_byte_content();
